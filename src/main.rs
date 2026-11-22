@@ -210,6 +210,14 @@ impl eframe::App for ScreenQrReaderApp {
 }
 
 fn main() -> eframe::Result {
+    let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
+    if cfg!(windows) {
+        if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut setup) = wgpu_options.wgpu_setup {
+            setup.instance_descriptor.backends =
+                eframe::wgpu::Backends::from_env().unwrap_or(eframe::wgpu::Backends::DX12);
+        }
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Screen QR Reader")
@@ -221,6 +229,7 @@ fn main() -> eframe::Result {
             .with_resizable(false)
             .with_inner_size([1.0, 1.0])
             .with_position([-10000.0, -10000.0]),
+        wgpu_options,
         ..Default::default()
     };
 
