@@ -18,6 +18,7 @@ struct ScreenQrReaderApp {
     hotkey: Option<global_hotkey::hotkey::HotKey>,
     captures: Vec<components::overlay::OverlayState>,
     is_capturing: bool,
+    animations_disabled: bool,
     event_rx: Receiver<AppEvent>,
 }
 
@@ -49,6 +50,7 @@ impl ScreenQrReaderApp {
             hotkey,
             captures: Vec::new(),
             is_capturing: false,
+            animations_disabled: false,
             event_rx: rx,
         }
     }
@@ -69,6 +71,7 @@ impl ScreenQrReaderApp {
             .map(components::overlay::OverlayState::new)
             .collect();
         self.is_capturing = true;
+        self.animations_disabled = false;
         core::platform::set_capturing_active(true);
     }
 
@@ -76,6 +79,7 @@ impl ScreenQrReaderApp {
         self.captures.clear();
         self.captures.shrink_to_fit();
         self.is_capturing = false;
+        self.animations_disabled = false;
         core::platform::set_capturing_active(false);
         core::capture::finish_capture();
         core::platform::trim_memory();
@@ -140,13 +144,13 @@ impl eframe::App for ScreenQrReaderApp {
                 ];
                 let vp_id = egui::ViewportId::from_hash_of(&format!("overlay_{}", i));
                 let vp_builder = egui::ViewportBuilder::default()
-                    .with_title("Screen QR Reader Overlay")
+                    .with_title(core::platform::OVERLAY_WINDOW_TITLE)
                     .with_visible(is_ready)
                     .with_decorations(false)
                     .with_resizable(false)
                     .with_has_shadow(false)
                     .with_taskbar(false)
-                    .with_transparent(true)
+                    .with_transparent(false)
                     .with_always_on_top()
                     .with_position(logical_pos)
                     .with_inner_size(logical_size);
@@ -156,6 +160,14 @@ impl eframe::App for ScreenQrReaderApp {
                     if !is_ready {
                         overlay_state.is_ready = true;
                         vp_ui.ctx().request_repaint();
+                        ctx.request_repaint();
+                    } else if !overlay_state.is_shown {
+                        overlay_state.is_shown = true;
+                        if i == 0 {
+                            vp_ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
+                        }
+                        vp_ui.ctx().request_repaint();
+                        ctx.request_repaint();
                     }
                     match action {
                         components::overlay::OverlayAction::Complete(rect) => {
@@ -169,7 +181,10 @@ impl eframe::App for ScreenQrReaderApp {
                 });
             }
 
-            core::platform::disable_overlay_window_animations();
+            if !self.animations_disabled {
+                core::platform::disable_overlay_window_animations();
+                self.animations_disabled = true;
+            }
 
             if let Some((idx, rect)) = completed_idx_and_rect {
                 if idx < self.captures.len() {

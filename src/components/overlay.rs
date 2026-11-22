@@ -9,6 +9,7 @@ pub struct OverlayState {
     pub texture: Option<egui::TextureHandle>,
     pub rect: SelectionRect,
     pub is_ready: bool,
+    pub is_shown: bool,
 }
 
 impl OverlayState {
@@ -18,6 +19,7 @@ impl OverlayState {
             texture: None,
             rect: SelectionRect::default(),
             is_ready: false,
+            is_shown: false,
         }
     }
 }

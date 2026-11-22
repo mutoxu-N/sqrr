@@ -1,7 +1,10 @@
 //! プラットフォーム固有のウィンドウ処理（アニメーション無効化など）
 
+pub const OVERLAY_WINDOW_TITLE: &str = "Screen QR Reader Overlay";
+
 #[cfg(windows)]
 mod windows_impl {
+    use super::OVERLAY_WINDOW_TITLE;
     use std::ffi::c_void;
     use std::mem::size_of;
     use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -12,10 +15,9 @@ mod windows_impl {
         GetCurrentProcess, GetCurrentThreadId, SetProcessWorkingSetSize,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, EnumThreadWindows, GetWindowLongW, SetWindowLongW, SetWindowsHookExW,
-        UnhookWindowsHookEx, CBT_CREATEWNDW, GWL_EXSTYLE, GWL_STYLE, HHOOK, HCBT_ACTIVATE,
-        HCBT_CREATEWND, WH_CBT, WS_CAPTION, WS_CHILD, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
-        WS_VISIBLE,
+        CallNextHookEx, EnumThreadWindows, GetWindowTextW, SetWindowsHookExW, UnhookWindowsHookEx,
+        CBT_CREATEWNDW, HHOOK, HCBT_ACTIVATE, HCBT_CREATEWND, WH_CBT, WS_CAPTION, WS_CHILD,
+        WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
     };
 
     static HOOK_HANDLE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -23,6 +25,33 @@ mod windows_impl {
 
     pub fn set_capturing_active(active: bool) {
         IS_CAPTURING.store(active, Ordering::SeqCst);
+    }
+
+    /// `CreateWindowExW` のタイトルポインタがオーバーレイウィンドウのものか判定
+    unsafe fn is_overlay_title_ptr(ptr: *const u16) -> bool {
+        if ptr.is_null() || (ptr as usize) < 0x10000 {
+            return false;
+        }
+        let mut idx = 0usize;
+        for expected in OVERLAY_WINDOW_TITLE.encode_utf16() {
+            if *ptr.add(idx) != expected {
+                return false;
+            }
+            idx += 1;
+        }
+        *ptr.add(idx) == 0
+    }
+
+    /// 既存ウィンドウがオーバーレイウィンドウかタイトルで判定
+    unsafe fn is_overlay_window(hwnd: HWND) -> bool {
+        let mut buf = [0u16; 64];
+        let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len <= 0 {
+            return false;
+        }
+        let actual = &buf[..len as usize];
+        let mut expected = OVERLAY_WINDOW_TITLE.encode_utf16();
+        actual.iter().all(|&c| expected.next() == Some(c)) && expected.next().is_none()
     }
 
     /// ウィンドウのDWMトランジション（表示・非表示・拡大縮小等のアニメーション）を強制的に無効化する
@@ -38,7 +67,7 @@ mod windows_impl {
         }
     }
 
-    /// CBTフックプロシージャ: ウィンドウ生成時およびアクティブ化直前にアニメーションを無効化
+    /// CBTフックプロシージャ: オーバーレイウィンドウ生成時およびアクティブ化直前にアニメーションを無効化
     unsafe extern "system" fn cbt_hook_proc(
         n_code: i32,
         w_param: WPARAM,
@@ -49,7 +78,7 @@ mod windows_impl {
                 let create_struct = l_param as *mut CBT_CREATEWNDW;
                 if !create_struct.is_null() && !(*create_struct).lpcs.is_null() {
                     let cs = &mut *(*create_struct).lpcs;
-                    if (cs.style as u32 & WS_CHILD) == 0 {
+                    if (cs.style as u32 & WS_CHILD) == 0 && is_overlay_title_ptr(cs.lpszName) {
                         let mut style = cs.style as u32;
                         // 1. 最初は非表示で作成（位置・サイズ調整完了まで画面に出さない）
                         style &= !WS_VISIBLE;
@@ -65,8 +94,10 @@ mod windows_impl {
                 }
             } else if n_code == HCBT_ACTIVATE as i32 {
                 let hwnd = w_param as HWND;
-                // 表示・アクティブ化直前にDWMトランジションを確実に無効化（HWNDが有効なタイミング）
-                disable_window_transitions(hwnd);
+                if is_overlay_window(hwnd) {
+                    // 表示・アクティブ化直前にDWMトランジションを確実に無効化（HWNDが有効なタイミング）
+                    disable_window_transitions(hwnd);
+                }
             }
         }
 
@@ -100,18 +131,12 @@ mod windows_impl {
         }
     }
 
-    /// 自スレッドの全オーバーレイウィンドウのアニメーションを無効化（バックアップ処理）
+    /// 自スレッドのオーバーレイウィンドウのみDWMアニメーションを無効化
     pub fn disable_overlay_window_animations() {
         unsafe {
             unsafe extern "system" fn enum_proc(hwnd: HWND, _l_param: LPARAM) -> BOOL {
-                disable_window_transitions(hwnd);
-                let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                if (ex_style as u32 & WS_EX_TOOLWINDOW) == 0 {
-                    SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW as i32);
-                }
-                let style = GetWindowLongW(hwnd, GWL_STYLE);
-                if (style as u32 & WS_POPUP) == 0 {
-                    SetWindowLongW(hwnd, GWL_STYLE, (style & !(WS_CAPTION as i32 | WS_THICKFRAME as i32)) | WS_POPUP as i32);
+                if is_overlay_window(hwnd) {
+                    disable_window_transitions(hwnd);
                 }
                 TRUE
             }
