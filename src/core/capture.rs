@@ -23,6 +23,7 @@ pub struct MonitorCapture {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    pub scale_factor: f32,
 }
 
 pub fn capture_all_monitors() -> Vec<MonitorCapture> {
@@ -41,6 +42,11 @@ pub fn capture_all_monitors() -> Vec<MonitorCapture> {
         let Ok(y) = m.y() else { continue; };
         let Ok(w) = m.width() else { continue; };
         let Ok(h) = m.height() else { continue; };
+        let scale_factor = m
+            .scale_factor()
+            .ok()
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .unwrap_or(1.0);
 
         if let Ok(image) = m.capture_image() {
             captures.push(MonitorCapture {
@@ -49,6 +55,7 @@ pub fn capture_all_monitors() -> Vec<MonitorCapture> {
                 y,
                 width: w,
                 height: h,
+                scale_factor,
             });
         }
     }

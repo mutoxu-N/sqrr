@@ -41,8 +41,9 @@ pub fn render_overlay(
             size,
             state.capture.image.as_raw(),
         );
+        let texture_name = format!("screen_capture_{}_{}", state.capture.x, state.capture.y);
         state.texture = Some(ctx.load_texture(
-            "screen_capture",
+            texture_name,
             color_image,
             egui::TextureOptions::LINEAR,
         ));
@@ -93,7 +94,25 @@ pub fn render_overlay(
     } else if response.drag_stopped_by(egui::PointerButton::Primary) {
         if state.rect.is_dragging {
             state.rect.is_dragging = false;
-            action = OverlayAction::Complete(state.rect);
+            // 論理座標からキャプチャ画像の物理ピクセル座標へ変換
+            let scale_x = if full_rect.width() > 0.0 {
+                state.capture.image.width() as f32 / full_rect.width()
+            } else {
+                state.capture.scale_factor
+            };
+            let scale_y = if full_rect.height() > 0.0 {
+                state.capture.image.height() as f32 / full_rect.height()
+            } else {
+                state.capture.scale_factor
+            };
+            let pixel_rect = SelectionRect {
+                start_x: (state.rect.start_x - full_rect.min.x) * scale_x,
+                start_y: (state.rect.start_y - full_rect.min.y) * scale_y,
+                current_x: (state.rect.current_x - full_rect.min.x) * scale_x,
+                current_y: (state.rect.current_y - full_rect.min.y) * scale_y,
+                is_dragging: false,
+            };
+            action = OverlayAction::Complete(pixel_rect);
         }
     }
 
